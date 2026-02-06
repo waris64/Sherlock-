@@ -1,0 +1,7 @@
+{
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "name": "Sherlock AI Detective",
+  "description": "Behavioral Reasoning Engine"
+}
