@@ -10,18 +10,26 @@ const PRIORITY_OPTIONS = [
   'PROFESSIONALISM', 'DOMINANCE', 'INSECURITY', 'SUBSTANCE_USE', 'ATHLETICISM'
 ];
 
+interface EventLogEntry extends Deduction {
+  timestamp: string;
+  id: string;
+}
+
 const App: React.FC = () => {
   const sessionId = useMemo(() => `CASE-${uuidv4().substring(0, 6).toUpperCase()}`, []);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isCCTVEnabled, setIsCCTVEnabled] = useState(false);
   const [currentAnalysis, setCurrentAnalysis] = useState<SherlockAnalysis | null>(null);
+  const [eventHistory, setEventHistory] = useState<EventLogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [memory, setMemory] = useState<string[]>([]);
-  const [activeDeduction, setActiveDeduction] = useState<number | null>(null);
+  const [activeDeductionId, setActiveDeductionId] = useState<string | null>(null);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const vaultEndRef = useRef<HTMLDivElement>(null);
   
   const [config, setConfig] = useState<AnalysisConfig>({
-    confidenceThreshold: 0.6,
-    priorityFlags: ['DECEPTION', 'AFFLUENCE'],
+    confidenceThreshold: 0.5,
+    priorityFlags: ['CRIMINAL_INTENT', 'AGITATION'],
     depthLevel: 'standard'
   });
 
@@ -29,109 +37,167 @@ const App: React.FC = () => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
     setError(null);
-    setCurrentAnalysis(null); 
     
     try {
       const result = await analyzeEvidence(base64, mimeType, sessionId, config, memory);
       setCurrentAnalysis(result);
       
+      // Update Persistent Event Log for CCTV
+      if (result.deductions && result.deductions.length > 0) {
+        const newEntries: EventLogEntry[] = result.deductions.map(d => ({
+          ...d,
+          id: uuidv4(),
+          timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        }));
+        
+        setEventHistory(prev => {
+          // Keep last 50 events for performance
+          const combined = [...newEntries, ...prev];
+          return combined.slice(0, 50);
+        });
+      }
+      
       if (result.session_memory) {
-        setMemory(prev => [...new Set([...prev, ...result.session_memory])].slice(-10));
+        setMemory(prev => [...new Set([...prev, ...result.session_memory])].slice(-20));
       }
     } catch (err: any) {
-      setError("Logical failure in thinking palace. The subject's profile is too complex.");
+      if (!isCCTVEnabled) {
+        setError("Logical failure: Thinking palace overloaded.");
+      }
+      console.error("Deduction Stream Error:", err);
     } finally {
       setIsAnalyzing(false);
     }
-  }, [sessionId, memory, isAnalyzing, config]);
+  }, [sessionId, memory, isAnalyzing, config, isCCTVEnabled]);
 
-  const togglePriorityFlag = (flag: string) => {
-    setConfig(prev => ({
-      ...prev,
-      priorityFlags: prev.priorityFlags.includes(flag)
-        ? prev.priorityFlags.filter(f => f !== flag)
-        : [...prev.priorityFlags, flag]
-    }));
+  const clearDeductionData = useCallback(() => {
+    setCurrentAnalysis(null);
+    setEventHistory([]);
+    setMemory([]);
+  }, []);
+
+  const toggleCCTVMode = () => {
+    const nextState = !isCCTVEnabled;
+    setIsCCTVEnabled(nextState);
+    if (nextState) {
+      clearDeductionData();
+    }
   };
+
+  // Auto-scroll vault when new events arrive
+  useEffect(() => {
+    if (isCCTVEnabled && vaultEndRef.current) {
+      vaultEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [eventHistory, isCCTVEnabled]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-gray-300 flex flex-col font-mono selection:bg-sky-500/30 overflow-x-hidden">
       <header className="px-6 py-4 border-b border-sky-900/30 flex justify-between items-center bg-black/90 sticky top-0 z-50 backdrop-blur-md">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 border border-sky-500/30 rounded-sm flex items-center justify-center bg-sky-500/10">
-            <span className="text-sky-500 font-bold text-xl">S</span>
+          <div className="relative group">
+            <div className="w-10 h-10 border border-sky-500/30 rounded-sm flex items-center justify-center bg-sky-500/10 shadow-[0_0_15px_rgba(14,165,233,0.1)]">
+              <span className="text-sky-500 font-bold text-xl">S</span>
+            </div>
+            {isCCTVEnabled && (
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full animate-ping" />
+            )}
           </div>
           <div>
             <h1 className="text-xl font-bold italic font-['Playfair_Display'] text-sky-400 hud-glow tracking-tight">
               Sherlock <span className="text-gray-500 font-normal">OS</span>
             </h1>
-            <p className="text-[7px] text-sky-500/50 tracking-[0.4em] uppercase font-bold">Deductive Engine v5.5</p>
+            <p className="text-[7px] text-sky-500/50 tracking-[0.4em] uppercase font-bold">Security_Interface v8.0.Live</p>
           </div>
         </div>
         
         <div className="flex items-center gap-6">
           <button 
-            onClick={() => setIsConfigOpen(!isConfigOpen)}
-            className={`p-2 border rounded-sm transition-colors duration-200 group ${isConfigOpen ? 'border-sky-400 bg-sky-400/20' : 'border-sky-900/30 hover:border-sky-400/50'}`}
-            title="Investigation Parameters"
+            onClick={toggleCCTVMode}
+            className={`px-6 py-2 border rounded-sm transition-all duration-300 flex items-center gap-4 group ${
+              isCCTVEnabled 
+                ? 'border-red-500 bg-red-600/10 text-red-500 shadow-[0_0_20px_rgba(220,38,38,0.2)]' 
+                : 'border-sky-900/30 bg-sky-500/5 text-sky-500 hover:border-sky-500/50'
+            }`}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transition-transform ${isConfigOpen ? 'rotate-90 text-sky-400' : 'text-sky-800 group-hover:text-sky-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-            </svg>
+            <div className={`w-2.5 h-2.5 rounded-full ${isCCTVEnabled ? 'bg-red-600 animate-pulse' : 'bg-sky-900'}`} />
+            <span className="text-[10px] font-bold tracking-[0.3em] uppercase">{isCCTVEnabled ? 'SYSTEM_LIVE' : 'ACTIVATE_CCTV'}</span>
           </button>
 
-          <div className="hidden md:flex flex-col items-end">
-            <span className="text-[8px] text-sky-900 font-bold uppercase tracking-widest">Session_Identifier</span>
-            <span className="text-xs font-bold text-sky-400">{sessionId}</span>
-          </div>
-          <div className={`px-4 py-1.5 border rounded-sm flex items-center gap-2 transition-colors ${
-            isAnalyzing ? 'border-amber-500/50 bg-amber-500/10' : 'border-sky-500/20 bg-sky-500/10'
-          }`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${isAnalyzing ? 'bg-amber-500 animate-pulse' : 'bg-sky-500'}`} />
-            <span className={`text-[9px] font-bold tracking-widest uppercase ${isAnalyzing ? 'text-amber-500' : 'text-sky-400'}`}>
-              {isAnalyzing ? 'DECONSTRUCTING...' : 'SYSTEM_READY'}
-            </span>
-          </div>
+          <button 
+            onClick={() => setIsConfigOpen(!isConfigOpen)}
+            className={`p-2 border rounded-sm transition-colors duration-200 group ${isConfigOpen ? 'border-sky-400 bg-sky-400/20' : 'border-sky-900/30 hover:border-sky-400/50'}`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${isConfigOpen ? 'text-sky-400' : 'text-sky-800'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      {/* Investigation Parameters Sidebar - Pure Black for Ultimate Contrast */}
-      <aside className={`fixed right-0 top-[73px] bottom-0 w-80 bg-black border-l border-sky-900/50 z-[100] transition-transform duration-300 ease-in-out transform ${isConfigOpen ? 'translate-x-0' : 'translate-x-full'} custom-scrollbar overflow-y-auto p-8 shadow-[0_0_60px_rgba(0,0,0,1)]`}>
+      {/* Configuration Sidebar */}
+      <aside className={`fixed right-0 top-[73px] bottom-0 w-80 bg-[#080808] border-l border-sky-900/50 z-[100] transition-transform duration-300 ease-in-out transform ${isConfigOpen ? 'translate-x-0' : 'translate-x-full'} custom-scrollbar overflow-y-auto p-8 shadow-2xl`}>
         <div className="space-y-10">
           <div>
-            <h3 className="text-sky-400 text-[11px] font-bold uppercase tracking-[0.25em] mb-6 flex items-center gap-3 text-shadow">
-              <div className="w-2 h-2 bg-sky-500 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
-              Logic Threshold
+            <h3 className="text-sky-500 text-[10px] font-bold uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
+              <div className="w-1.5 h-1.5 bg-sky-500 rounded-full" />
+              Deduction Sensibility
             </h3>
-            <div className="space-y-4">
-              <input 
-                type="range" min="0" max="1" step="0.05" 
-                value={config.confidenceThreshold}
-                onChange={(e) => setConfig(prev => ({ ...prev, confidenceThreshold: parseFloat(e.target.value) }))}
-                className="w-full accent-sky-500 h-1 bg-sky-950 rounded-lg appearance-none cursor-pointer"
-              />
-              <div className="flex justify-between items-center px-1">
-                <span className="text-[9px] text-sky-800 font-bold tracking-tight">SPECULATIVE</span>
-                <span className="text-sm text-sky-200 font-bold bg-sky-500/10 px-2 py-0.5 rounded-sm">{(config.confidenceThreshold * 100).toFixed(0)}%</span>
-                <span className="text-[9px] text-sky-800 font-bold tracking-tight">ABSOLUTE</span>
-              </div>
+            <input 
+              type="range" min="0" max="1" step="0.05" 
+              value={config.confidenceThreshold}
+              onChange={(e) => setConfig(prev => ({ ...prev, confidenceThreshold: parseFloat(e.target.value) }))}
+              className="w-full accent-sky-500 h-1 bg-sky-950 rounded-lg appearance-none cursor-pointer"
+            />
+            <div className="flex justify-between mt-3 text-[9px] text-sky-800 uppercase font-bold">
+              <span>Hyper-Sensitive</span>
+              <span>Filter: {(config.confidenceThreshold * 100).toFixed(0)}%</span>
+              <span>Absolute</span>
             </div>
           </div>
 
           <div>
-            <h3 className="text-sky-400 text-[11px] font-bold uppercase tracking-[0.25em] mb-6 flex items-center gap-3">
-              <div className="w-2 h-2 bg-sky-500 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
-              Priority Vectors
+            <h3 className="text-sky-500 text-[10px] font-bold uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
+              <div className="w-1.5 h-1.5 bg-sky-500 rounded-full" />
+              Analytical Depth
             </h3>
-            <div className="flex flex-wrap gap-2.5">
+            <div className="grid grid-cols-3 gap-2">
+              {(['fast', 'standard', 'exhaustive'] as const).map(depth => (
+                <button
+                  key={depth}
+                  onClick={() => setConfig(prev => ({ ...prev, depthLevel: depth }))}
+                  className={`py-2 border text-[8px] font-bold uppercase tracking-widest rounded-sm ${
+                    config.depthLevel === depth ? 'border-sky-400 bg-sky-400/20 text-sky-200' : 'border-white/5 text-white/20'
+                  }`}
+                >
+                  {depth}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sky-500 text-[10px] font-bold uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
+              <div className="w-1.5 h-1.5 bg-sky-500 rounded-full" />
+              Focus Traits
+            </h3>
+            <div className="flex flex-wrap gap-2">
               {PRIORITY_OPTIONS.map(flag => (
                 <button
                   key={flag}
-                  onClick={() => togglePriorityFlag(flag)}
-                  className={`px-3 py-1.5 border text-[9px] font-bold transition-all rounded-sm tracking-wider ${
+                  onClick={() => {
+                    setConfig(prev => ({
+                      ...prev,
+                      priorityFlags: prev.priorityFlags.includes(flag)
+                        ? prev.priorityFlags.filter(f => f !== flag)
+                        : [...prev.priorityFlags, flag]
+                    }));
+                  }}
+                  className={`px-3 py-1.5 border text-[8px] font-bold transition-all rounded-sm tracking-wider ${
                     config.priorityFlags.includes(flag) 
-                      ? 'border-sky-400 bg-sky-400/20 text-sky-50 shadow-[0_0_15px_rgba(56,189,248,0.25)]' 
-                      : 'border-white/10 text-white/40 hover:border-white/30 hover:text-white/60'
+                      ? 'border-sky-400 bg-sky-400/20 text-sky-100' 
+                      : 'border-white/5 text-white/30 hover:border-white/20'
                   }`}
                 >
                   {flag}
@@ -140,140 +206,117 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <h3 className="text-sky-400 text-[11px] font-bold uppercase tracking-[0.25em] mb-6 flex items-center gap-3">
-              <div className="w-2 h-2 bg-sky-500 rounded-full shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
-              Deductive Depth
-            </h3>
-            <div className="grid grid-cols-3 gap-2">
-              {(['fast', 'standard', 'exhaustive'] as const).map(level => (
-                <button
-                  key={level}
-                  onClick={() => setConfig(prev => ({ ...prev, depthLevel: level }))}
-                  className={`py-3 border text-[9px] font-bold transition-all rounded-sm uppercase tracking-widest ${
-                    config.depthLevel === level 
-                      ? 'border-amber-500 bg-amber-500/20 text-amber-100 shadow-[0_0_15px_rgba(245,158,11,0.25)]' 
-                      : 'border-white/10 text-white/40 hover:border-white/30'
-                  }`}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-            <p className="mt-4 text-[10px] text-white/40 italic leading-relaxed">Exhaustive mode maximizes visual reasoning depth, capturing micro-clues like fabric wear or brand logos.</p>
-          </div>
-
-          <div className="pt-10 border-t border-white/5">
-            <button 
-              onClick={() => setIsConfigOpen(false)}
-              className="w-full py-4 bg-sky-500 text-black font-bold text-[11px] uppercase tracking-[0.3em] rounded-sm hover:bg-sky-400 transition-colors shadow-[0_10px_30px_rgba(56,189,248,0.2)]"
-            >
-              Commit Parameters
-            </button>
-          </div>
+          <button 
+            onClick={() => setIsConfigOpen(false)}
+            className="w-full py-4 bg-sky-600 text-black font-bold text-[10px] uppercase tracking-[0.4em] rounded-sm hover:bg-sky-500 transition-colors shadow-lg mt-10"
+          >
+            Apply Protocol
+          </button>
         </div>
       </aside>
 
-      <main className={`flex-1 p-6 lg:p-10 w-full max-w-[1800px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 transition-[margin-right] duration-300 ${isConfigOpen ? 'lg:mr-80' : ''}`}>
+      <main className={`flex-1 p-6 lg:p-10 w-full max-w-[1900px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 transition-all duration-300 ${isConfigOpen ? 'lg:pr-[340px]' : ''}`}>
         
-        {/* Left: Visualization Feed */}
+        {/* Left: Security Feed */}
         <div className="lg:col-span-7 flex flex-col gap-6">
           <CameraHUD 
             onCapture={handleCapture} 
             analysisResults={currentAnalysis} 
             isAnalyzing={isAnalyzing} 
-            onReset={() => { setCurrentAnalysis(null); setError(null); }}
+            isCCTVActive={isCCTVEnabled}
+            onReset={clearDeductionData}
           />
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatBox label="INTENT_VECTOR" value={currentAnalysis?.scan_data?.intent_prediction} primary />
-            <div className="md:col-span-2 bg-sky-500/5 border border-sky-500/20 p-5 rounded-sm flex flex-col h-[130px]">
-              <div className="text-[9px] text-sky-700 font-bold uppercase mb-3 shrink-0 tracking-widest">Behavioral_Fingerprint</div>
-              <div className="flex flex-wrap gap-2 overflow-y-auto custom-scrollbar flex-1 pr-1 pb-2">
+            <div className="md:col-span-3 bg-black border border-sky-900/30 p-5 rounded-sm h-[130px] flex flex-col shadow-xl">
+              <div className="text-[9px] text-sky-900 font-bold uppercase mb-3 tracking-[0.2em]">Telemetry_Log</div>
+              <div className="flex flex-wrap gap-2 overflow-y-auto custom-scrollbar pr-2 pb-2">
                 {currentAnalysis?.scan_data?.behavioral_flags?.map((f, i) => (
-                  <span key={i} className="text-[10px] bg-black/80 border border-sky-500/40 px-3 py-1.5 text-sky-400 uppercase tracking-widest font-bold">
+                  <span key={i} className="text-[10px] bg-sky-500/5 border border-sky-500/30 px-3 py-1.5 text-sky-400 uppercase tracking-widest font-bold animate-fadeIn">
                     {f}
                   </span>
-                )) || <span className="text-[10px] text-sky-900/50 italic uppercase tracking-tighter">Scanning for markers...</span>}
+                )) || <span className="text-[10px] text-sky-950 italic">Feed inactive...</span>}
               </div>
             </div>
           </div>
 
-          {currentAnalysis && (
-            <div className="bg-sky-950/20 border border-sky-500/40 p-8 rounded-sm animate-fadeIn relative overflow-hidden shadow-2xl">
-              <h3 className="text-[10px] text-sky-500 font-bold uppercase tracking-[0.4em] mb-4">Mind Palace Synthesis</h3>
-              <p className="text-xl lg:text-3xl font-['Playfair_Display'] italic text-sky-50 leading-relaxed">
-                "{currentAnalysis.final_assessment}"
-              </p>
-            </div>
-          )}
-          {error && <div className="p-4 bg-red-500/10 border border-red-500/40 text-red-500 text-[10px] uppercase tracking-widest text-center animate-fadeIn font-bold">{error}</div>}
+          <div className={`p-8 rounded-sm transition-all duration-700 relative overflow-hidden shadow-2xl border ${
+            isCCTVEnabled ? 'bg-black border-red-900/40' : 'bg-sky-950/20 border-sky-500/40'
+          }`}>
+            <h3 className={`text-[10px] font-bold uppercase tracking-[0.4em] mb-4 ${isCCTVEnabled ? 'text-red-500' : 'text-sky-500'}`}>
+              {isCCTVEnabled ? 'LIVE_SYNTHESIS' : 'FINAL_DEDUCTION'}
+            </h3>
+            <p className="text-xl lg:text-3xl font-['Playfair_Display'] italic text-gray-100 leading-relaxed min-h-[4rem]">
+              {currentAnalysis ? `"${currentAnalysis.final_assessment}"` : "Awaiting input data..."}
+            </p>
+          </div>
         </div>
 
-        {/* Right: Data Feed & History */}
+        {/* Right: Security Archive */}
         <div className="lg:col-span-5 flex flex-col gap-6">
           
           <div className="grid grid-cols-2 gap-3">
             <MiniStat label="ATTENTION" value={currentAnalysis?.scan_data?.attention_score ? `${Math.round(currentAnalysis.scan_data.attention_score * 100)}%` : '--'} />
             <MiniStat label="POSTURE" value={currentAnalysis?.scan_data?.posture_score ? `${Math.round(currentAnalysis.scan_data.posture_score * 100)}%` : '--'} />
-            <MiniStat label="ENVIRONMENT" value={currentAnalysis?.scan_data?.environment} />
             <MiniStat label="STANCE" value={currentAnalysis?.scan_data?.stance} />
+            <MiniStat label="BALANCE" value={currentAnalysis?.scan_data?.balance} />
           </div>
 
-          <div className="flex-1 bg-black/80 border border-sky-900/40 rounded-sm flex flex-col min-h-[450px] shadow-2xl">
-            <div className="px-6 py-4 border-b border-sky-900/30 flex justify-between items-center bg-black/90 sticky top-0 z-10">
-              <span className="text-[11px] text-sky-400 font-bold tracking-[0.25em] uppercase">Observation_Vault</span>
-              <span className="text-[9px] text-sky-800 font-bold tracking-widest uppercase">LOGS: {currentAnalysis?.deductions.length || 0}</span>
+          <div className={`flex-1 bg-black border rounded-sm flex flex-col min-h-[500px] shadow-2xl relative transition-colors ${
+            isCCTVEnabled ? 'border-red-900/30' : 'border-sky-900/40'
+          }`}>
+            <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center bg-black/80 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full ${isCCTVEnabled ? 'bg-red-600 animate-pulse' : 'bg-sky-500'}`} />
+                <span className="text-[11px] text-sky-400 font-bold tracking-[0.3em] uppercase">Observation_Vault</span>
+              </div>
+              <span className="text-[9px] text-sky-800 font-bold tracking-[0.2em] uppercase">ENTRIES: {eventHistory.length}</span>
             </div>
             
-            <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
-              {!currentAnalysis && !isAnalyzing && (
-                <div className="h-full flex flex-col items-center justify-center opacity-30 text-center py-20 grayscale">
-                  <div className="w-14 h-14 border border-sky-500/50 rounded-full flex items-center justify-center mb-6">
-                    <span className="animate-ping absolute w-10 h-10 bg-sky-500 rounded-full opacity-30" />
-                    <span className="text-sky-500 font-bold text-xl">?</span>
-                  </div>
-                  <p className="text-[11px] uppercase tracking-[0.4em] text-sky-900 font-bold">Awaiting Case Evidence</p>
+            <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1 max-h-[600px]">
+              {eventHistory.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center opacity-20 py-20">
+                  <p className="text-[10px] uppercase tracking-[0.5em] text-sky-900 font-bold">Observation log empty</p>
                 </div>
               )}
 
-              {currentAnalysis?.deductions.map((d, i) => (
+              {eventHistory.map((entry) => (
                 <div 
-                  key={i} 
-                  onClick={() => setActiveDeduction(activeDeduction === i ? null : i)}
-                  className={`p-5 border transition-all cursor-pointer rounded-sm group ${
-                    activeDeduction === i ? 'bg-sky-500/10 border-sky-500/60' : 'bg-black/40 border-sky-900/20 hover:border-sky-500/40'
+                  key={entry.id} 
+                  onClick={() => setActiveDeductionId(activeDeductionId === entry.id ? null : entry.id)}
+                  className={`p-4 border transition-all cursor-pointer rounded-sm group animate-fadeIn ${
+                    activeDeductionId === entry.id 
+                      ? 'bg-sky-500/10 border-sky-400/50' 
+                      : 'bg-[#030303] border-white/5 hover:border-sky-500/30'
                   }`}
                 >
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-1.5 h-1.5 bg-sky-500 rounded-full shadow-[0_0_5px_rgba(56,189,248,1)]" />
-                      <span className="text-sky-400 font-bold text-[12px] uppercase tracking-wide group-hover:text-sky-300">{d.title}</span>
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[8px] text-sky-900 font-bold bg-black px-1.5 py-0.5 rounded-sm border border-white/5">{entry.timestamp}</span>
+                      <span className="text-sky-400 font-bold text-[10px] uppercase tracking-wider">{entry.title}</span>
                     </div>
-                    <div className="flex flex-col items-end">
-                       <span className="text-[8px] text-sky-900 font-bold uppercase tracking-tighter">CONFIDENCE</span>
-                       <div className="w-16 h-1 bg-sky-900/40 mt-1.5 rounded-full overflow-hidden">
-                          <div className="h-full bg-sky-400" style={{ width: `${(d.confidence || 0.8) * 100}%` }} />
-                       </div>
-                    </div>
+                    <span className="text-[8px] text-sky-700 font-bold uppercase">{Math.round(entry.confidence * 100)}%</span>
                   </div>
-                  <p className="text-[11px] text-gray-400 font-mono leading-relaxed">{d.detail}</p>
+                  <p className="text-[10px] text-gray-500 font-mono leading-relaxed truncate group-hover:whitespace-normal">{entry.detail}</p>
                   
-                  {activeDeduction === i && (
-                    <div className="mt-5 pt-5 border-t border-sky-900/40 space-y-5 animate-fadeIn">
-                      <div>
-                        <div className="text-[10px] text-sky-500/60 uppercase font-bold mb-3 tracking-widest">Logical Pathway</div>
-                        {d.logic_steps.map((step, si) => (
-                          <div key={si} className="text-[11px] text-sky-100/70 pl-4 border-l-2 border-sky-500/40 mb-3 py-1 leading-snug">{step}</div>
-                        ))}
-                      </div>
+                  {activeDeductionId === entry.id && (entry.logic_steps || entry.grounding) && (
+                    <div className="mt-4 pt-4 border-t border-white/5 space-y-4 animate-fadeIn">
+                      {entry.logic_steps && (
+                        <div>
+                          <div className="text-[8px] text-sky-500/60 uppercase font-bold mb-2 tracking-widest">Logic Trail</div>
+                          {entry.logic_steps.map((step, si) => (
+                            <div key={si} className="text-[10px] text-gray-400 pl-3 border-l border-sky-950 mb-2 py-0.5">{step}</div>
+                          ))}
+                        </div>
+                      )}
                       
-                      {d.grounding && (
+                      {entry.grounding && (
                         <div className="bg-amber-500/5 p-3 border border-amber-500/20 rounded-sm">
-                          <div className="text-[10px] text-amber-500/60 uppercase font-bold mb-2 tracking-widest">Grounding_Sources (Verified)</div>
-                          {d.grounding.map((g, gi) => (
-                            <a key={gi} href={g.uri} target="_blank" rel="noreferrer" className="text-[10px] text-amber-500/90 hover:text-amber-300 hover:underline block mb-2 last:mb-0 truncate font-bold">
-                              [EXTERNAL] {g.title}
+                          <div className="text-[8px] text-amber-500/60 uppercase font-bold mb-2 tracking-widest">Grounding_Context</div>
+                          {entry.grounding.map((g, gi) => (
+                            <a key={gi} href={g.uri} target="_blank" rel="noreferrer" className="text-[9px] text-amber-500/90 hover:text-amber-300 block mb-1 truncate underline decoration-amber-500/20">
+                              {g.title}
                             </a>
                           ))}
                         </div>
@@ -282,28 +325,35 @@ const App: React.FC = () => {
                   )}
                 </div>
               ))}
+              <div ref={vaultEndRef} />
             </div>
           </div>
         </div>
       </main>
+      
+      {error && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-8 py-4 bg-red-950/90 border border-red-500 text-red-500 text-[10px] uppercase tracking-widest font-bold shadow-2xl backdrop-blur-md">
+          {error}
+        </div>
+      )}
     </div>
   );
 };
 
 const StatBox = ({ label, value, primary }: { label: string; value?: string; primary?: boolean }) => (
-  <div className={`border p-5 rounded-sm flex flex-col h-[130px] transition-colors ${primary ? 'bg-sky-500/10 border-sky-500/50' : 'bg-black/60 border-sky-900/30'}`}>
+  <div className={`border p-5 rounded-sm flex flex-col h-[130px] transition-all shadow-xl ${primary ? 'bg-sky-500/5 border-sky-500/40' : 'bg-black border-sky-900/30'}`}>
     <div className={`text-[9px] font-bold uppercase mb-3 shrink-0 tracking-widest ${primary ? 'text-sky-400' : 'text-sky-900'}`}>{label}</div>
-    <div className={`text-[12px] font-['Playfair_Display'] italic leading-relaxed overflow-y-auto custom-scrollbar flex-1 pr-1 break-words ${primary ? 'text-sky-50 font-bold' : 'text-gray-400'}`}>
+    <div className={`text-[12px] italic leading-relaxed overflow-y-auto custom-scrollbar flex-1 pr-1 break-words font-['Playfair_Display'] ${primary ? 'text-sky-50' : 'text-gray-400'}`}>
       {value || '---'}
     </div>
   </div>
 );
 
 const MiniStat = ({ label, value }: { label: string; value?: string }) => (
-  <div className="bg-black/90 border border-sky-900/30 px-4 py-3 rounded-sm h-[85px] flex flex-col overflow-hidden shadow-inner">
-    <div className="text-[8px] text-sky-800 font-bold uppercase mb-2 shrink-0 tracking-widest">{label}</div>
-    <div className="text-[10px] text-sky-400 font-bold uppercase tracking-widest overflow-y-auto custom-scrollbar flex-1 pr-1 break-words leading-snug flex items-start">
-      <span className="w-full h-fit">{value || '--'}</span>
+  <div className="bg-black border border-white/5 px-4 py-3 rounded-sm h-[80px] flex flex-col shadow-inner">
+    <div className="text-[7px] text-sky-900 font-bold uppercase mb-2 tracking-[0.2em]">{label}</div>
+    <div className="text-[10px] text-sky-400 font-bold uppercase tracking-widest overflow-hidden truncate">
+      {value || '--'}
     </div>
   </div>
 );

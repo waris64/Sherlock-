@@ -70,7 +70,8 @@ export async function analyzeEvidence(
   config: AnalysisConfig,
   previousMemory: string[] = []
 ): Promise<SherlockAnalysis> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Use the exact mandated initialization
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const priorityInstruction = config.priorityFlags.length > 0 
     ? `IMPORTANT: Prioritize looking for and flagging these behaviors/traits: ${config.priorityFlags.join(', ')}.`
